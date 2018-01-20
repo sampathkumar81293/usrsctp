@@ -49,6 +49,7 @@
 #define atomic_subtract_int(addr, val)   InterlockedExchangeAdd((LPLONG)addr,-((LONG)val))
 #define atomic_cmpset_int(dst, exp, src) InterlockedCompareExchange((LPLONG)dst, src, exp)
 #define SCTP_DECREMENT_AND_CHECK_REFCOUNT(addr) (InterlockedExchangeAdd((LPLONG)addr, (-1L)) == 1)
+#error came to next if  block
 #else
 #include <libkern/OSAtomic.h>
 #define atomic_add_int(addr, val) OSAtomicAdd32Barrier(val, (int32_t *)addr)
@@ -56,6 +57,7 @@
 #define atomic_subtract_int(addr, val) OSAtomicAdd32Barrier(-val, (int32_t *)addr)
 #define atomic_cmpset_int(dst, exp, src) OSAtomicCompareAndSwapIntBarrier(exp, src, (int *)dst)
 #define SCTP_DECREMENT_AND_CHECK_REFCOUNT(addr) (atomic_fetchadd_int(addr, -1) == 0)
+
 #endif
 
 #if defined(INVARIANTS)
@@ -68,6 +70,7 @@
 	} \
 }
 #else
+
 #define SCTP_SAVE_ATOMIC_DECREMENT(addr, val) \
 { \
 	int32_t newval; \
@@ -76,6 +79,7 @@
 		*addr = 0; \
 	} \
 }
+
 #endif
 #if defined(__Userspace_os_Windows)
 static void atomic_init() {} /* empty when we are not using atomic_mtx */
@@ -89,18 +93,22 @@ static inline void atomic_init() {} /* empty when we are not using atomic_mtx */
    Requires gcc version 4.1.0
    compile with -march=i486
  */
-
+ //comment
+#if 0
 /*Atomically add V to *P.*/
-#define atomic_add_int(P, V)	 (void) __sync_fetch_and_add(P, V)
+//#define atomic_add_int(P, V)	 (void) __sync_fetch_and_add(P, V)
+#define atomic_add_int(P,V)		__atomic_fetch_add(P, V, __ATOMIC_SEQ_CST)
 
 /*Atomically subtrace V from *P.*/
-#define atomic_subtract_int(P, V) (void) __sync_fetch_and_sub(P, V)
+//#define atomic_subtract_int(P, V) (void) __sync_fetch_and_sub(P, V)
+#define atomic_subtract_int(P,V)		__atomic_fetch_sub(P, V, __ATOMIC_SEQ_CST)
 
 /*
  * Atomically add the value of v to the integer pointed to by p and return
  * the previous value of *p.
  */
-#define atomic_fetchadd_int(p, v) __sync_fetch_and_add(p, v)
+// #define atomic_fetchadd_int(p, v) __sync_fetch_and_add(p, v)
+#define atomic_fetchadd_int(p, v)	__atomic_fetch_add(p, v, __ATOMIC_SEQ_CST)
 
 /* Following explanation from src/sys/i386/include/atomic.h,
  * for atomic compare and set
@@ -110,7 +118,22 @@ static inline void atomic_init() {} /* empty when we are not using atomic_mtx */
  * Returns 0 on failure, non-zero on success
  */
 
-#define atomic_cmpset_int(dst, exp, src) __sync_bool_compare_and_swap(dst, exp, src)
+// #define atomic_cmpset_int(dst, exp, src) __sync_bool_compare_and_swap(dst, exp, src)		 __atomic_compare_exchange_n(ptr, &_old, new, false,__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+// #define atomic_cmpset_int(dst, exp, src)		 __atomic_compare_exchange_n(dst, &exp, src, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+
+// static inline bool atomic_compare_and_set_bool(bool *variable, bool old_value, bool new_value){
+//   return __atomic_compare_exchange_n (variable, &old_value, new_value, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+// }
+                            
+static inline int atomic_compare_and_set_int(int *variable, int old_value, int new_value){
+  return __atomic_compare_exchange_n (variable, &old_value, new_value, 0 , __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+}
+
+static inline int atomic_compare_and_set_uint32(uint32_t *variable, uint32_t old_value, uint32_t new_value){
+  return __atomic_compare_exchange_n (variable, &old_value, new_value, 0 , __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+}
+
+#define atomic_cmpset_int(name, old_value, new_value) atomic_compare_and_set_uint32(name, old_value, new_value)
 
 #define SCTP_DECREMENT_AND_CHECK_REFCOUNT(addr) (atomic_fetchadd_int(addr, -1) == 1)
 #if defined(INVARIANTS)
@@ -131,9 +154,14 @@ static inline void atomic_init() {} /* empty when we are not using atomic_mtx */
 		*addr = 0; \
 	} \
 }
+
+
 #endif
 static inline void atomic_init() {} /* empty when we are not using atomic_mtx */
 #endif
+//comment
+#endif
+
 
 #if 0 /* using libatomic_ops */
 #include "user_include/atomic_ops.h"
@@ -167,7 +195,7 @@ static inline void atomic_init() {} /* empty when we are not using atomic_mtx */
 static inline void atomic_init() {} /* empty when we are not using atomic_mtx */
 #endif /* closing #if for libatomic */
 
-#if 0 /* using atomic_mtx */
+#if 1 /* using atomic_mtx */
 
 #include <pthread.h>
 
@@ -220,85 +248,115 @@ static inline void atomic_unlock() {
  * on both SMP and !SMP systems.
  */
 
+#define SCTP_DECREMENT_AND_CHECK_REFCOUNT(addr) (atomic_fetchadd_int((u_int *)(addr), -1) == 0)
+#define SCTP_SAVE_ATOMIC_DECREMENT(addr, val) \
+{ \
+	int32_t newval; \
+	newval = atomic_fetchadd_int(addr, -val); \
+	if (newval < 0) { \
+		*addr = 0; \
+	} \
+}
+
 #define	MPLOCKED	"lock ; "
 
-/*
- * Atomically add the value of v to the integer pointed to by p and return
- * the previous value of *p.
+
+
+// static __inline uint64_t
+// atomic_load_acq_64_i386(volatile uint64_t *p)
+// {
+// 	volatile uint32_t *q;
+// 	uint64_t res;
+
+// 	q = (volatile uint32_t *)p;
+// 	__asm __volatile(
+// 	"	pushfl ;		"
+// 	"	cli ;			"
+// 	"	movl	%1,%%eax ;	"
+// 	"	movl	%2,%%edx ;	"
+// 	"	popfl"
+// 	: "=&A" (res)			/* 0 */
+// 	: "m" (*q),			/* 1 */
+// 	  "m" (*(q + 1))		/* 2 */
+// 	: "memory");
+// 	return (res);
+// }
+
+
+
+// static __inline int
+// atomic_cmpset_int(volatile u_int *dst, u_int expect, u_int src)
+// {
+// 	volatile u_int *p;
+// 	u_char res;
+
+// 	p = (volatile uint32_t *)dst;
+//  __asm__ __volatile__ (
+// 	"	pushfl ;		"
+// 	"	cli ;			"
+// 	"	xorl	%1,%%eax ;	"
+// 	"	xorl	%2,%%edx ;	"
+// 	"	orl	%%edx,%%eax ;	"
+// 	"	jne	1f ;		"
+// 	"	movl	%4,%1 ;		"
+// 	"	movl	%5,%2 ;		"
+// 	"1:				"
+// 	"	sete	%3 ;		"
+// 	"	popfl"
+// 	: "+A" (expect),		/* 0 */
+// 	  "+m" (*p),			/* 1 */
+// 	  "+m" (*(p + 1)),		/* 2 */
+// 	  "=q" (res)			/* 3 */
+// 	: "r" (src)				/* 4 */
+// 	: "memory", "cc");
+// 		atomic_unlock();
+// 	return (res);
+// }
+
+
+static __inline int
+atomic_cmpset_int(volatile u_int *dst, u_int expect, u_int src)
+{
+ /* Atomic compare and set, used by the mutex functions
+ *
+ * if (*dst == exp) *dst = src (all 32 bit words)
+ *
+ * Returns 0 on failure, non-zero on success
  */
-static __inline u_int
-atomic_fetchadd_int(volatile void *n, u_int v)
-{
-	int *p = (int *) n;
-	atomic_lock();
-	__asm __volatile(
-	"	" MPLOCKED "		"
-	"	xaddl	%0, %1 ;	"
-	"# atomic_fetchadd_int"
-	: "+r" (v),			/* 0 (result) */
-	  "=m" (*p)			/* 1 */
-	: "m" (*p));			/* 2 */
-	atomic_unlock();
 
-	return (v);
+int ret=0;
+ atomic_lock();
+
+ if (*(u_int *)(dst) == expect) {
+	*(u_int *)(dst) = src;
+	ret =1;
+}
+ else ret=1;
+ 
+ atomic_unlock();
+
+ return ret;
 }
 
 
-#ifdef CPU_DISABLE_CMPXCHG
+
+
 
 static __inline int
-atomic_cmpset_int(volatile u_int *dst, u_int exp, u_int src)
+atomic_fetchadd_int(volatile u_int *p, u_int v)
 {
-	u_char res;
 
-	atomic_lock();
-	__asm __volatile(
-	"	pushfl ;		"
-	"	cli ;			"
-	"	cmpl	%3,%4 ;		"
-	"	jne	1f ;		"
-	"	movl	%2,%1 ;		"
-	"1:				"
-	"       sete	%0 ;		"
-	"	popfl ;			"
-	"# atomic_cmpset_int"
-	: "=q" (res),			/* 0 */
-	  "=m" (*dst)			/* 1 */
-	: "r" (src),			/* 2 */
-	  "r" (exp),			/* 3 */
-	  "m" (*dst)			/* 4 */
-	: "memory");
-	atomic_unlock();
-
-	return (res);
+	for (;;) {
+		// u_int t = *p;
+		u_int t = *(u_int *)(p);
+		if (atomic_cmpset_int(p, t, t + v))
+			return ((u_int)t);
+	}
 }
 
-#else /* !CPU_DISABLE_CMPXCHG */
 
-static __inline int
-atomic_cmpset_int(volatile u_int *dst, u_int exp, u_int src)
-{
-	atomic_lock();
-	u_char res;
 
-	__asm __volatile(
-	"	" MPLOCKED "		"
-	"	cmpxchgl %2,%1 ;	"
-	"	sete	%0 ;		"
-	"1:				"
-	"# atomic_cmpset_int"
-	: "=a" (res),			/* 0 */
-	  "=m" (*dst)			/* 1 */
-	: "r" (src),			/* 2 */
-	  "a" (exp),			/* 3 */
-	  "m" (*dst)			/* 4 */
-	: "memory");
-	atomic_unlock();
 
-	return (res);
-}
-
-#endif /* CPU_DISABLE_CMPXCHG */
 
 #define atomic_add_int(P, V)	 do {   \
 		atomic_lock();          \
